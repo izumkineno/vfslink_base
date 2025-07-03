@@ -1,0 +1,4 @@
+/target
+duckdb.dll
+duckdb.lib
+*.db
