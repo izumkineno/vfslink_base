@@ -1,15 +1,13 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, fmt::Display};
 
 use anyhow::Ok;
 use duckdb::Connection;
 
-use crate::{
-    model_insert::{FNPack, InfoBase},
-    model_select::{ConflictFileList, FileOverLinkList, FileOverTree, FileTreeNode, PackInfo},
-};
-
 pub mod model_insert;
 pub mod model_select;
+
+pub use model_insert::*;
+pub use model_select::*;
 
 const SQL_INIT: &'static str = include_str!(r"..\sql\init\core.sql");
 const SQL_INIT_INFO: &'static str = include_str!(r"..\sql\init\info.sql");
@@ -81,8 +79,12 @@ pub enum ViewOverTree<'a> {
     GetChildren(&'a Vec<String>),
     /// 获取所有路径
     GetAllPaths,
-    /// 获取路径冲突文件
+    /// 获取路径冲突文件 参数为文件路径
     GetConflictFiles(&'a str),
+    /// 获取哈希相等的文件列表
+    GetHashEqualFiles(&'a str),
+    /// 获取所有哈希冲突的文件
+    GetAllHashEqualFiles,
 }
 
 impl<'a> ViewOverTree<'a> {
@@ -105,6 +107,12 @@ impl<'a> ViewOverTree<'a> {
 
     const SQL_GET_CONFLICT_FILES: &'static str =
         include_str!(r"..\sql\tool\get_conflict_files.sql");
+
+    const SQL_GET_HASH_EQUAL_FILES: &'static str =
+        include_str!(r"..\sql\tool\get_hash_equal_files.sql");
+
+    const SQL_GET_ALL_HASH_EQUAL_FILES: &'static str =
+        include_str!(r"..\sql\tool\get_hash_equal_group.sql");
 }
 
 #[derive(Debug)]
@@ -112,6 +120,8 @@ pub enum ResultOverTree {
     TreeList(Vec<FileOverTree>),
     LinkList(Vec<FileOverLinkList>),
     ConflictFileList(Vec<ConflictFileList>),
+    HashEqualFileList(Vec<HashEqualFiles>),
+    HashEqualFileGroup(Vec<Vec<HashEqualFiles>>),
 }
 
 impl ResultOverTree {
@@ -131,6 +141,20 @@ impl ResultOverTree {
     }
     pub fn as_conflict_file_list(self) -> Vec<ConflictFileList> {
         if let Self::ConflictFileList(list) = self {
+            list
+        } else {
+            vec![]
+        }
+    }
+    pub fn as_hash_equal_file_list(self) -> Vec<HashEqualFiles> {
+        if let Self::HashEqualFileList(list) = self {
+            list
+        } else {
+            vec![]
+        }
+    }
+    pub fn as_hash_equal_file_group(self) -> Vec<Vec<HashEqualFiles>> {
+        if let Self::HashEqualFileGroup(list) = self {
             list
         } else {
             vec![]
@@ -156,6 +180,14 @@ impl<'a> ViewOverTree<'a> {
             Self::GetConflictFiles(_) => {
                 let result = ConflictFileList::get_res(&mut stmt)?;
                 Ok(ResultOverTree::ConflictFileList(result))
+            }
+            Self::GetHashEqualFiles(_) => {
+                let result = HashEqualFiles::get_res(&mut stmt)?;
+                Ok(ResultOverTree::HashEqualFileList(result))
+            }
+            Self::GetAllHashEqualFiles => {
+                let result = HashEqualFiles::get_res_group(&mut stmt)?;
+                Ok(ResultOverTree::HashEqualFileGroup(result))
             }
         }
     }
@@ -184,6 +216,8 @@ impl<'a> ViewOverTree<'a> {
                 path
             )
             .into(),
+            GetHashEqualFiles(path) => Self::SQL_GET_HASH_EQUAL_FILES.replace('$', path).into(),
+            GetAllHashEqualFiles => Self::SQL_GET_ALL_HASH_EQUAL_FILES.into(),
         }
     }
 }
@@ -294,12 +328,14 @@ impl<'a> ViewPack<'a> {
 
 /// 包的管理
 pub enum ListPack<'a> {
-    /// 插入包
+    /// 插入包 参数为包的路径、基础信息
     Insert(&'a str, InfoBase),
-    /// 删除包
+    /// 删除包 参数为包的id
     RemoveById(&'a str),
     /// 更新包的活动状态，参数为文件id、是否活动
     SetActive(&'a str, bool),
+    // 更新部署状态，参数为文件id、是否部署
+    SetDeployed(&'a str, bool),
     /// 更新包的优先级，参数为文件id、优先级
     SetPriority(&'a str, f64),
     /// 更新包的基础信息
@@ -311,6 +347,13 @@ pub enum ListPack<'a> {
 impl<'a> ListPack<'a> {
     const SQL_REMOVE_PACK: &'static str = include_str!(r"..\sql\tool\delete_pack.sql");
     const SQL_TOOL_RESET_PRIORITY: &'static str = include_str!(r"..\sql\tool\reset_priority.sql");
+
+    fn set_pack_sql(key: &str, value: impl Display, id: &str) -> String {
+        format!(
+            "UPDATE PriorityPack SET {} = {} WHERE pack_id = '{}';",
+            key, value, id
+        )
+    }
     /// 执行包相关操作
     pub fn execute(&self, conn: &Connection) {
         use ListPack::*;
@@ -327,18 +370,15 @@ impl<'a> ListPack<'a> {
                 conn.execute_batch(&sql).unwrap();
             }
             SetActive(file_id, is_active) => {
-                let sql = format!(
-                    "UPDATE PriorityPack SET is_active = {} WHERE pack_id = '{}';",
-                    if *is_active { 1 } else { 0 },
-                    file_id
-                );
+                let sql = Self::set_pack_sql("is_active", is_active, file_id);
+                conn.execute(&sql, []).unwrap();
+            }
+            SetDeployed(file_id, is_deployed) => {
+                let sql = Self::set_pack_sql("is_deployed", is_deployed, file_id);
                 conn.execute(&sql, []).unwrap();
             }
             SetPriority(file_id, priority) => {
-                let sql = format!(
-                    "UPDATE PriorityPack SET priority = {} WHERE pack_id = '{}';",
-                    priority, file_id
-                );
+                let sql = Self::set_pack_sql("priority", priority, file_id);
                 conn.execute(&sql, []).unwrap();
             }
             SetInfo(file_id, info) => {
@@ -360,6 +400,8 @@ impl<'a> ListPack<'a> {
 pub enum ListTree<'a> {
     /// 更新文件的活动状态，参数为文件id、是否活动
     SetActive(&'a str, bool),
+    /// 设置部署状态
+    SetDeployed(&'a str, bool),
     /// 添加独立覆盖规则
     AddCoverRule(&'a str, &'a str, &'a str),
     /// 移除独立覆盖规则
@@ -369,16 +411,23 @@ pub enum ListTree<'a> {
 }
 
 impl ListTree<'_> {
+    fn set_file_node_sql(key: &str, value: impl Display, id: &str) -> String {
+        format!(
+            "UPDATE FileNode SET {} = {} WHERE id = '{}';",
+            key, value, id
+        )
+    }
+
     /// 生成 SQL 或执行操作
     pub fn execute(&self, conn: &Connection) {
         use ListTree::*;
         match self {
             SetActive(file_id, is_active) => {
-                let sql = format!(
-                    "UPDATE FileNode SET is_active = {} WHERE id = '{}';",
-                    if *is_active { 1 } else { 0 },
-                    file_id
-                );
+                let sql = Self::set_file_node_sql("is_active", is_active, file_id);
+                conn.execute(&sql, []).unwrap();
+            }
+            SetDeployed(file_id, is_deployed) => {
+                let sql = Self::set_file_node_sql("is_deployed", is_deployed, file_id);
                 conn.execute(&sql, []).unwrap();
             }
             AddCoverRule(path, file_id, pack_id) => {

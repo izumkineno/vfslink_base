@@ -4,7 +4,7 @@ mod test {
     use duckdb::arrow::{array::RecordBatch, util::pretty::print_batches};
     use uuid::Uuid;
 
-    use vfslink_base::{FNDB, ViewOverTree, ListPack, ViewPack, ListTree};
+    use vfslink_base::{FNDB, ListPack, ListTree, ViewOverTree, ViewPack};
 
     const PATH: &str = "example1.db";
 
@@ -468,6 +468,37 @@ mod test {
             let res = ViewOverTree::GetConflictFiles("说明.txt")
                 .execute(fndb.get_conn())
                 .unwrap();
+            println!("{:#?}", res);
+        }
+
+        // 检查指定id的哈希冲突列表
+        #[test]
+        fn test_check_hash_conflict() {
+            let mut fndb = FNDB::new(PATH);
+            fndb.connect_rw();
+
+            let res = ViewOverTree::GetHashEqualFiles("0cc6ab58-79a2-47ae-b253-66bbeeaf8f38")
+                .execute(fndb.get_conn())
+                .unwrap()
+                .as_hash_equal_file_list();
+            println!("{:#?}", res);
+        }
+
+        // 获取所有哈希冲突文件
+        #[test]
+        fn test_get_all_hash_conflict_files() {
+            let mut fndb = FNDB::new(PATH);
+            fndb.connect_rw();
+
+            let sql = ViewOverTree::GetAllHashEqualFiles.to_sql();
+            let mut stmt = fndb.get_conn().prepare(&sql).unwrap();
+            let rbs: Vec<RecordBatch> = stmt.query_arrow([]).unwrap().collect();
+            print_batches(&rbs).unwrap();
+
+            let res = ViewOverTree::GetAllHashEqualFiles
+                .execute(fndb.get_conn())
+                .unwrap()
+                .as_hash_equal_file_group();
             println!("{:#?}", res);
         }
 

@@ -1,6 +1,5 @@
-use duckdb::{types::Value, Statement};
+use duckdb::{Statement, types::Value};
 use serde::{Deserialize, Serialize};
-
 
 /// 包信息结构体
 #[derive(Debug, Serialize)]
@@ -154,8 +153,6 @@ impl FileTreeNode {
     }
 }
 
-
-
 /// 文件树视图结构体
 #[derive(Debug, Serialize, Clone)]
 pub struct FileOverTree {
@@ -229,7 +226,6 @@ impl FileOverLinkList {
     /// 获取覆盖链接列表
     #[inline]
     pub fn get_res(stmt: &mut Statement<'_>) -> anyhow::Result<Vec<Self>> {
-
         let rows = stmt.query_map([], |row| {
             let file_id: String = row.get(0)?;
             let pack_id: String = row.get(1)?;
@@ -251,8 +247,6 @@ impl FileOverLinkList {
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 }
-
-
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ConflictFile {
@@ -303,5 +297,46 @@ impl ConflictFileList {
         })?;
 
         Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct HashEqualFiles {
+    id: String,
+    pack_id: String,
+    pack_path: String,
+    path: String,
+    hash: String,
+}
+
+impl HashEqualFiles {
+    pub fn get_res(stmt: &mut Statement<'_>) -> anyhow::Result<Vec<Self>> {
+        let rows = stmt.query_map([], |row| {
+            let id: String = row.get(0)?;
+            let pack_id: String = row.get(1)?;
+            let pack_path: String = row.get(2)?;
+            let path: String = row.get(3)?;
+            let hash: String = row.get(4)?;
+            Ok(HashEqualFiles {
+                id,
+                pack_id,
+                pack_path,
+                path,
+                hash,
+            })
+        })?;
+
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    pub fn get_res_group(stmt: &mut Statement<'_>) -> anyhow::Result<Vec<Vec<HashEqualFiles>>> {
+        let rows = stmt.query_map([], |row| {
+            let group: Value = row.get(0)?;
+            let binding = serde_json::to_value(&group).unwrap();
+            let v: Vec<HashEqualFiles> = serde_json::from_value(binding).unwrap();
+            Ok(v)
+        })?;
+
+        Ok(rows.filter_map(|r| r.ok()).collect::<Vec<_>>())
     }
 }

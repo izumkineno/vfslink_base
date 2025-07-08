@@ -40,8 +40,8 @@ CREATE TABLE IF NOT EXISTS PriorityPack (
 -- 只记录顶部文件
 -- 不与包信息的覆盖状态合并，仅在查询部署时合并
 CREATE TABLE IF NOT EXISTS PriorityFN (
-    path VARCHAR PRIMARY KEY,                                                 -- 覆盖路径
-    main_id UUID NOT NULL,                -- 主要文件id
+    path VARCHAR PRIMARY KEY,                                     -- 覆盖路径
+    main_id UUID NOT NULL,                                        -- 主要文件id
     pack_id UUID NOT NULL,                                        -- 所属包id 
     is_active BOOLEAN DEFAULT TRUE NOT NULL,                      -- 覆盖规则启用状态
 );
